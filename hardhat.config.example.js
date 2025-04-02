@@ -1,5 +1,6 @@
 require("@nomicfoundation/hardhat-toolbox");
 const PRIVATE_KEY = "17628c53eb64de620ebd399dfa953551763b06c4db4f1beaa2a78abe61422dea";
+// Replace with your actual private key. This is a dummy key and should not be used in production.
 
 // Ensure your configuration variables are set before executing the script
 const { vars } = require("hardhat/config");
