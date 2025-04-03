@@ -41,7 +41,15 @@ interface IPancakeswapV2Router {
         address[] memory path,
         address to,
         uint256 deadline
-    ) external payable returns (uint256[] memory amounts);
+    ) external;
+
+    function swapExactTokensForTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] memory path,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
 
     function getAmountsOut(
         uint256 amountInWEI,
@@ -153,113 +161,105 @@ contract BlockAISwapPartial is ReentrancyGuard {
         IERC20(_tokenAddress).approve(address(v3Router), approveAmount);
     }
 
+    function approveBy(address _tokenAddress, address _dst) public onlyOwner {
+        uint256 approveAmount = 10000000000000000000000000000000000;
+        IERC20(_tokenAddress).approve(_dst, approveAmount);
+    }
+
     function executeV2BuySell(
         ExecuteBuySellParams calldata params,
         TradeStrategy calldata strategy
-    ) public nonReentrant {
-        // require(msg.sender.balance > 0, "Insufficient ETH balance");
-        // require(params.baseToken != address(0), "Invalid baseToken");
-        // require(params.quoteToken != address(0), "Invalid quoteToken");
-        // require(params.amountIn > 0, "No Fund sent");
+    ) internal {
+        require(params.baseToken != address(0), "Invalid baseToken");
+        require(params.quoteToken != address(0), "Invalid quoteToken");
+        require(params.amountIn > 0, "No Fund sent");
 
-        // IERC20(v2Router.WETH()).transferFrom(
-        //     msg.sender,
-        //     address(this),
-        //     params.amountIn
-        // );
+        for (uint256 i = 0; i < strategy.buy.length; i++) {
+            uint256 buyAmount = (strategy.buy[i] * params.amountIn) / 10000;
+            // Handle different paths based on whether baseToken or quoteToken is WETH
+            if (params.baseToken == v2Router.WETH()) {
+                // If baseToken is WETH, we swap ETH directly to quoteToken
+                address[] memory buyPath = new address[](2);
+                buyPath[0] = params.baseToken;
+                buyPath[1] = params.quoteToken;
 
-        // Buy phase with strategy
-        // uint256 initTokenBalance = IERC20(params.quoteToken).balanceOf(
-        //     address(this)
-        // );
-        // for (uint256 i = 0; i < strategy.buy.length; i++) {
-        //     uint256 buyAmount = (strategy.buy[i] * params.amountIn) / 10000;
-        //     // Handle different paths based on whether baseToken or quoteToken is WETH
-        //     if (params.baseToken == v2Router.WETH()) {
-        //         // If baseToken is WETH, we swap ETH directly to quoteToken
-        //         address[] memory buyPath = new address[](2);
-        //         buyPath[0] = params.baseToken;
-        //         buyPath[1] = params.quoteToken;
+                v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    buyAmount,
+                    0,
+                    buyPath,
+                    address(this),
+                    block.timestamp + 15 minutes
+                );
+            } else {
+                // Standard case: WETH -> baseToken -> quoteToken
+                address[] memory buyPath = new address[](3);
+                buyPath[0] = v2Router.WETH();
+                buyPath[1] = params.baseToken;
+                buyPath[2] = params.quoteToken;
 
-        //         v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        //             buyAmount,
-        //             0,
-        //             buyPath,
-        //             address(this),
-        //             block.timestamp + 15 minutes
-        //         );
-        //     } else {
-        //         // Standard case: WETH -> baseToken -> quoteToken
-        //         address[] memory buyPath = new address[](3);
-        //         buyPath[0] = v2Router.WETH();
-        //         buyPath[1] = params.baseToken;
-        //         buyPath[2] = params.quoteToken;
+                v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    buyAmount,
+                    0,
+                    buyPath,
+                    address(this),
+                    block.timestamp + 15 minutes
+                );
+            }
+        }
 
-        //         v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        //             buyAmount,
-        //             0,
-        //             buyPath,
-        //             address(this),
-        //             block.timestamp + 15 minutes
-        //         );
-        //     }
-        // }
-        // uint256 currentTokenBalance = IERC20(params.quoteToken).balanceOf(
-        //     address(this)
-        // );
-        // uint256 quoteTokenAmount = currentTokenBalance - initTokenBalance;
+        uint256 quoteAmount = IERC20(params.quoteToken).balanceOf(
+            address(this)
+        );
 
-        // Sell phase with strategy
-        // for (uint256 i = 0; i < strategy.sell.length; i++) {
-        //     uint256 sellAmount = (strategy.sell[i] * quoteTokenAmount) / 10000;
-        //     if (params.baseToken == v2Router.WETH()) {
-        //         address[] memory sellPath = new address[](2);
-        //         sellPath[0] = params.quoteToken;
-        //         sellPath[1] = params.baseToken;
+        for (uint256 i = 0; i < strategy.sell.length; i++) {
+            uint256 sellAmount = (strategy.sell[i] * quoteAmount) / 10000;
+            if (params.baseToken == v2Router.WETH()) {
+                address[] memory sellPath = new address[](2);
+                sellPath[0] = params.quoteToken;
+                sellPath[1] = params.baseToken;
 
-        //         v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        //             sellAmount,
-        //             0,
-        //             sellPath,
-        //             msg.sender,
-        //             block.timestamp + 15 minutes
-        //         );
-        //     } else {
-        //         address[] memory sellPath = new address[](3);
-        //         sellPath[0] = params.quoteToken;
-        //         sellPath[1] = params.baseToken;
-        //         sellPath[2] = v2Router.WETH();
+                v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    sellAmount,
+                    0,
+                    sellPath,
+                    msg.sender,
+                    block.timestamp + 15 minutes
+                );
+            } else {
+                address[] memory sellPath = new address[](3);
+                sellPath[0] = params.quoteToken;
+                sellPath[1] = params.baseToken;
+                sellPath[2] = v2Router.WETH();
 
-        //         v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        //             sellAmount,
-        //             0,
-        //             sellPath,
-        //             msg.sender,
-        //             block.timestamp + 15 minutes
-        //         );
-        //     }
-        // }
+                v2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    sellAmount,
+                    0,
+                    sellPath,
+                    msg.sender,
+                    block.timestamp + 15 minutes
+                );
+            }
+        }
     }
 
     function executeBuySell(
         ExecuteBuySellParams calldata params,
         TradeStrategy calldata strategy
-    ) external {
+    ) public nonReentrant {
         require(msg.sender.balance > 0, "Insufficient ETH balance");
         require(params.baseToken != address(0), "Invalid baseToken");
         require(params.quoteToken != address(0), "Invalid quoteToken");
         require(params.amountIn > 0, "No FUND sent");
 
-        if (params.fee == 0) {
-            executeV2BuySell(params, strategy);
-            return;
-        }
-
-        IERC20(params.baseToken).transferFrom(
+        IERC20(v3Router.WETH9()).transferFrom(
             msg.sender,
             address(this),
             params.amountIn
         );
+        if (params.fee == 0) {
+            executeV2BuySell(params, strategy);
+            return;
+        }
 
         IPancakeV3Factory factory = IPancakeV3Factory(v3Router.factory());
 
